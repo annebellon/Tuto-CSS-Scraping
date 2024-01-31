@@ -1,0 +1,91 @@
+############TD#########
+####### Collecter des données en ligne ##################
+
+install.packages(c("RCurl","XML" ))
+
+library(RCurl)### récupérer des pages URL
+library(XML)### parser : parcourir un texte Html pour en extraire des éléments
+
+
+####Exercice 1 : Créer une base de données sur les députés 
+
+### 1a/ Pour récupérer le code une page web : la fonction getURL. 
+page<-getURL("https://www.nosdeputes.fr/deputes", ssl.verifypeer=F)
+### 1b/ Parser la page (fonction "htmlParse")
+page<-htmlParse(page)
+
+
+
+### 2a/ Ecrire l'expression Xpath qui permet d'obtenir le nom de tous les députés
+###     Créer un objet "noms" avec le nom de tous les députés
+###     Récupérer les noms de partis et de circonscriptions
+noms<-xpathSApply(page, "//span[@class='list_nom']", xmlValue)
+circos<-xpathSApply(page, "//div[@class='list_dep jstitle phototitle block']//span[@class='list_right'][1]", xmlValue)
+partis<-xpathSApply(page, "//span[@class='list_left']", xmlValue)
+
+### 2// Ecire avec seulement les députés en activités (n=577)
+noms<-xpathSApply(page, "//div[@class='list_dep jstitle phototitle block']/span[@class='list_nom']", xmlValue)
+partis<-xpathSApply(page, "//div[@class='list_dep jstitle phototitle block']/span[@class='list_left']/span", xmlValue)
+circos<-xpathSApply(page, "//div[@class='list_dep jstitle phototitle block']//span[@class='list_right'][1]", xmlValue)
+
+
+deputes<-data.frame(cbind(noms, partis, circos))
+
+#### 3/ Récupérer les métiers, nombres de d'amendements et présences en hémicycle des députés
+#3/a Récupération des adresses
+adresses<-xpathSApply(page, "//div[@class='list_dep jstitle phototitle block']/span[@class='urlphoto']", xmlGetAttr, "title")
+adresses<-paste0("https://www.nosdeputes.fr", adresses)
+adresses
+
+###Création d'une boucle pour récuperer les informations
+## pour l'ensemble des députés
+
+deputes$professions<-NA
+deputes$amendements<-NA
+deputes$presence<-NA
+
+##Test pour les 20 premières lignes
+for (i in 1:20){
+  page<-htmlParse(getURL(adresses[i], ssl.verifypeer=F))
+  deputes$presence[i]<-xpathSApply(page, "//li[1]/a[@class='jstitle']/text()", xmlValue)
+  deputes$amendements[i]<-xpathSApply(page, "//li[6]/a[@class='jstitle']/text()", xmlValue)
+  deputes$professions[i]<-xpathSApply(page,"//div[@id='b1']/ul/li[5]", xmlValue)
+  print(adresses[i])
+}
+
+## Au préalable j'enlève la député Ingrid Dordain qui n'a pas de fiche
+deputes<-deputes[-164,]
+adresses<-adresses[-164]
+
+for (i in 1:576){
+  page<-htmlParse(getURL(adresses[i],ssl.verifypeer=F))
+  deputes$professions[i]<-xpathSApply(page,"//div[@id='b1']/ul/li[5]", xmlValue)
+  if(length(xpathSApply(page,"//li[6]/a[@class='jstitle']//text()", xmlValue))!=0){
+    deputes$amendements[i]<-xpathSApply(page,"//li[6]/a[@class='jstitle']//text()", xmlValue)
+  }else{deputes$amendements[i]<-xpathSApply(page,"//li[6]/span[@class='jstitle']//text()", xmlValue)}
+  if(length(xpathSApply(page,"//li[1]/a[@class='jstitle']//text()", xmlValue))!=0)
+  { deputes$presence[i]<-xpathSApply(page,"//li[1]/a[@class='jstitle']//text()", xmlValue)
+  }else{deputes$presence[i]<-xpathSApply(page,"//li[1]/span[@class='jstitle']//text()", xmlValue)}
+  print(c(i,adresses[i]))
+}
+
+### Gestion des cas problématiques et valeurs manquantes
+## Pour les professions
+library(stringr)
+#Je repère les professions où il ya la date de naissances
+##-->décalage de la liste vers le bas
+for (i in which(str_detect(deputes$professions, "^Né")==T)){
+  page<-htmlParse(getURL(adresses[i],ssl.verifypeer=F))
+  deputes$professions[i]<-xpathSApply(page,"//div[@id='b1']/ul/li[6]", xmlValue)
+  print(adresses[i])
+  }
+##Je repère les professions où il y a Liens 
+##-->décalage de la liste vers le haut
+for (i in which(str_detect(deputes$professions, "^Liens")==T)){
+  page<-htmlParse(getURL(adresses[i],ssl.verifypeer=F))
+  deputes$professions[i]<-xpathSApply(page,"//div[@id='b1']/ul/li[4]", xmlValue)
+  print(adresses[i])
+}
+
+##Enregistrer le tableau final
+write.csv(deputes,"deputes2023.csv", row.names = F)
